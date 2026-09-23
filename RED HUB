@@ -1,0 +1,397 @@
+-- MM2 One-Tap Shoot Murderer (Torso + Jump Lock)
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+
+-- 1. สร้าง GUI ปุ่มกดยิง
+local screenGui = LocalPlayer:WaitForChild("PlayerGui"):FindFirstChild("MM2_ShootButtonGui")
+if not screenGui then
+    screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "MM2_ShootButtonGui"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+end
+
+local shootBtn = Instance.new("TextButton")
+shootBtn.Name = "ShootBtn"
+shootBtn.Size = UDim2.new(0, 120, 0, 50)
+shootBtn.Position = UDim2.new(0.4, 0, 0.7, 0)
+shootBtn.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
+shootBtn.Text = "🎯 SHOOT"
+shootBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+shootBtn.TextScaled = true
+shootBtn.Font = Enum.Font.SourceSansBold
+shootBtn.Parent = screenGui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 10)
+corner.Parent = shootBtn
+
+local stroke = Instance.new("UIStroke")
+stroke.Thickness = 2
+stroke.Color = Color3.fromRGB(255, 255, 255)
+stroke.Parent = shootBtn
+
+-- ระบบลากปุ่ม GUI
+local dragging = false
+local dragInput, dragStart, startPos
+
+shootBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = shootBtn.Position
+
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+shootBtn.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        shootBtn.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+-- 2. ฟังก์ชันหาตัว Murderer (ฆาตกร)
+local function getMurderer()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local char = player.Character
+            local backpack = player:FindFirstChildOfClass("Backpack") or player:FindFirstChild("Backpack")
+            
+            local hasKnife = (char:FindFirstChild("Knife")) or (backpack and backpack:FindFirstChild("Knife"))
+            if hasKnife then
+                return player
+            end
+        end
+    end
+    return nil
+end
+
+-- 3. ฟังก์ชันกดยิง (ล็อคกลางลำตัว + ดักจังหวะกระโดด)
+local function shootMurderer()
+    local char = LocalPlayer.Character
+    if not char then return end
+
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local humanoid = char:FindFirstChildWhichIsA("Humanoid")
+    if not hrp or not humanoid then return end
+
+    -- ดึงปืนจาก Backpack หรือจากมือ
+    local backpack = LocalPlayer:FindFirstChildOfClass("Backpack") or LocalPlayer:FindFirstChild("Backpack")
+    local gun = char:FindFirstChild("Gun") or (backpack and backpack:FindFirstChild("Gun"))
+
+    if not gun then
+        print("ไม่พบปืนในกระเป๋าหรือในมือ!")
+        return
+    end
+
+    -- สวมใส่ปืน
+    if gun.Parent ~= char then
+        humanoid:EquipTool(gun)
+        task.wait(0.1) -- รอสวมใส่ปืนเล็กน้อย
+    end
+
+    local shootEvent = gun:FindFirstChild("Shoot")
+    local murderer = getMurderer()
+
+    if shootEvent and murderer and murderer.Character then
+        local mChar = murderer.Character
+        
+        -- เจาะจงส่วน "กลางลำตัว" โดยตรง (UpperTorso สำหรับ R15 / Torso สำหรับ R6)
+        local torso = mChar:FindFirstChild("UpperTorso") 
+                   or mChar:FindFirstChild("Torso") 
+                   or mChar:FindFirstChild("HumanoidRootPart")
+
+        if torso then
+            -- ดึงพิกัดตำแหน่งจริงกลางลำตัว
+            local targetPos = torso.Position
+
+            -- คำนวณชดเชยการกระโดด (Velocity แกน Y) เพื่อไม่ให้ยิงพลาดใต้เท้าตอนลอยตัว
+            local velocity = torso.AssemblyLinearVelocity or torso.Velocity or Vector3.zero
+            if math.abs(velocity.Y) > 0.5 then
+                -- ถ้าฆาตกรกำลังกระโดด/ลอยตัว ให้ขยับพิกัดตามทิศทางการลอยตัวเล็กน้อย
+                targetPos = targetPos + Vector3.new(velocity.X * 0.03, velocity.Y * 0.03, velocity.Z * 0.03)
+            end
+
+            -- สร้าง CFrame เล็งตรงไปที่จุดกลางลำตัวของฆาตกร
+            local targetCFrame = CFrame.new(targetPos)
+
+            local args = {
+                hrp.CFrame,     -- CFrame จุดเริ่มยิง (ตำแหน่งตัวเรา)
+                targetCFrame    -- CFrame กลางลำตัวฆาตกร (ชดเชยจังหวะกระโดดแล้ว)
+            }
+
+            shootEvent:FireServer(unpack(args))
+            print("ยิงตรงเข้ากลางลำตัวฆาตกรเรียบร้อย!")
+        end
+    end
+end
+
+shootBtn.MouseButton1Click:Connect(shootMurderer)
+
+print("One-Tap Jump-Lock Shoot Script Ready!")
+
+-- ESP Script for MM2 (มี GUI ปุ่มเปิด-ปิด + คำเดิม DROPPED GUN)
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+
+local espActive = true
+
+-- สีการแสดงผล
+local COLOR_MURDERER = Color3.fromRGB(255, 0, 0)      -- สีแดง (ฆาตกร)
+local COLOR_SHERIFF  = Color3.fromRGB(0, 0, 255)      -- สีน้ำเงิน (นายอำเภอ)
+local COLOR_INNOCENT = Color3.fromRGB(0, 255, 0)      -- สีเขียว (ผู้บริสุทธิ์)
+local COLOR_DROPPED_GUN = Color3.fromRGB(255, 255, 0) -- สีเหลือง (ปืนตก)
+
+-- 1. ระบบ GUI ปุ่มเปิด-ปิด
+local screenGui = LocalPlayer:WaitForChild("PlayerGui"):FindFirstChild("MM2_ESP_Gui")
+if not screenGui then
+    screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "MM2_ESP_Gui"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+end
+
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Name = "ToggleBtn"
+toggleBtn.Size = UDim2.new(0, 130, 0, 45)
+toggleBtn.Position = UDim2.new(0.05, 0, 0.4, 0)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
+toggleBtn.Text = "ESP: ON"
+toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleBtn.TextScaled = true
+toggleBtn.Font = Enum.Font.SourceSansBold
+toggleBtn.Parent = screenGui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 8)
+corner.Parent = toggleBtn
+
+-- ระบบลากปุ่ม GUI
+local dragging = false
+local dragInput, dragStart, startPos
+
+toggleBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = toggleBtn.Position
+
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+toggleBtn.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        toggleBtn.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+-- 2. ฟังก์ชันตรวจสอบบทบาทผู้เล่น
+local function getPlayerRole(player)
+    local character = player.Character
+    local backpack = player:FindFirstChildOfClass("Backpack") or player:FindFirstChild("Backpack")
+    
+    local hasKnife = (character and character:FindFirstChild("Knife")) or (backpack and backpack:FindFirstChild("Knife"))
+    if hasKnife then return "Murderer" end
+
+    local hasGun = (character and character:FindFirstChild("Gun")) or (backpack and backpack:FindFirstChild("Gun"))
+    if hasGun then return "Sheriff" end
+
+    return "Innocent"
+end
+
+-- 3. ฟังก์ชันอัปเดต ESP ผู้เล่น
+local function updatePlayerESP(player)
+    if player == LocalPlayer then return end
+    local character = player.Character
+    if not character then return end
+
+    local highlight = character:FindFirstChild("MM2_Player_ESP")
+    
+    if not espActive then
+        if highlight then highlight.Enabled = false end
+        return
+    end
+
+    if not highlight then
+        highlight = Instance.new("Highlight")
+        highlight.Name = "MM2_Player_ESP"
+        highlight.FillTransparency = 0.5
+        highlight.OutlineTransparency = 0
+        highlight.Parent = character
+    end
+
+    highlight.Enabled = true
+    local role = getPlayerRole(player)
+    if role == "Murderer" then
+        highlight.FillColor = COLOR_MURDERER
+        highlight.OutlineColor = COLOR_MURDERER
+    elseif role == "Sheriff" then
+        highlight.FillColor = COLOR_SHERIFF
+        highlight.OutlineColor = COLOR_SHERIFF
+    else
+        highlight.FillColor = COLOR_INNOCENT
+        highlight.OutlineColor = COLOR_INNOCENT
+    end
+end
+
+-- 4. ฟังก์ชันตรวจเช็กปืนตก (กรองปืนตกแต่งออก)
+local function checkAndApplyGunESP(object)
+    local isGunName = (object.Name == "GunDrop" or object.Name == "NormalGun")
+    local isNotHeld = not object:IsDescendantOf(Players)
+    
+    local parentName = object.Parent and object.Parent.Name or ""
+    local isDecoration = string.find(parentName:lower(), "lobby") 
+                      or string.find(parentName:lower(), "shop") 
+                      or string.find(parentName:lower(), "display") 
+                      or string.find(parentName:lower(), "decor")
+
+    if isGunName and isNotHeld and not isDecoration then
+        task.wait(0.05)
+        local mainPart = object:IsA("BasePart") and object or object:FindFirstChildWhichIsA("BasePart", true)
+        
+        if mainPart then
+            local highlight = object:FindFirstChild("Gun_Highlight")
+            local billboard = mainPart:FindFirstChild("Gun_Billboard")
+
+            if not highlight then
+                highlight = Instance.new("Highlight")
+                highlight.Name = "Gun_Highlight"
+                highlight.FillColor = COLOR_DROPPED_GUN
+                highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+                highlight.FillTransparency = 0.2
+                highlight.OutlineTransparency = 0
+                highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                highlight.Parent = object
+            end
+
+            if not billboard then
+                billboard = Instance.new("BillboardGui")
+                billboard.Name = "Gun_Billboard"
+                billboard.AlwaysOnTop = true
+                billboard.Size = UDim2.new(0, 150, 0, 50)
+                billboard.StudsOffset = Vector3.new(0, 2, 0)
+                billboard.Parent = mainPart
+
+                local label = Instance.new("TextLabel")
+                label.Name = "GunLabel"
+                label.Size = UDim2.new(1, 0, 1, 0)
+                label.BackgroundTransparency = 1
+                label.Text = "🔫 DROPPED GUN"
+                label.TextColor3 = COLOR_DROPPED_GUN
+                label.TextScaled = true
+                label.Font = Enum.Font.SourceSansBold
+                label.TextStrokeTransparency = 0
+                label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+                label.Parent = billboard
+            end
+
+            highlight.Enabled = espActive
+            billboard.Enabled = espActive
+        end
+    end
+end
+
+-- อัปเดตสถานะการแสดงผลทั้งหมด
+local function refreshAllESP()
+    for _, player in ipairs(Players:GetPlayers()) do
+        updatePlayerESP(player)
+    end
+    for _, item in ipairs(Workspace:GetDescendants()) do
+        if item.Name == "GunDrop" or item.Name == "NormalGun" then
+            local highlight = item:FindFirstChild("Gun_Highlight")
+            local mainPart = item:IsA("BasePart") and item or item:FindFirstChildWhichIsA("BasePart", true)
+            local billboard = mainPart and mainPart:FindFirstChild("Gun_Billboard")
+
+            if highlight then highlight.Enabled = espActive end
+            if billboard then billboard.Enabled = espActive end
+        end
+    end
+end
+
+-- สลับการทำงานของปุ่ม GUI
+toggleBtn.MouseButton1Click:Connect(function()
+    espActive = not espActive
+    if espActive then
+        toggleBtn.Text = "ESP: ON"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
+    else
+        toggleBtn.Text = "ESP: OFF"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
+    end
+    refreshAllESP()
+end)
+
+-- 5. ระบบติดตามผู้เล่น
+local function setupPlayerListeners(player)
+    local function listenBackpack(backpack)
+        if not backpack then return end
+        updatePlayerESP(player)
+        backpack.ChildAdded:Connect(function() updatePlayerESP(player) end)
+        backpack.ChildRemoved:Connect(function() updatePlayerESP(player) end)
+    end
+
+    local function onCharacterAdded(character)
+        task.wait(0.3)
+        updatePlayerESP(player)
+
+        character.ChildAdded:Connect(function() updatePlayerESP(player) end)
+        character.ChildRemoved:Connect(function() updatePlayerESP(player) end)
+        
+        local backpack = player:FindFirstChildOfClass("Backpack") or player:WaitForChild("Backpack", 3)
+        listenBackpack(backpack)
+    end
+
+    if player.Character then
+        onCharacterAdded(player.Character)
+    end
+    player.CharacterAdded:Connect(onCharacterAdded)
+
+    player.ChildAdded:Connect(function(child)
+        if child:IsA("Backpack") then
+            listenBackpack(child)
+        end
+    end)
+end
+
+-- ดักจับปืนที่เกิดขึ้นใหม่ในแมพ
+Workspace.DescendantAdded:Connect(function(item)
+    checkAndApplyGunESP(item)
+end)
+
+-- เริ่มต้นทำงานกับผู้เล่นในเซิร์ฟเวอร์
+for _, player in ipairs(Players:GetPlayers()) do
+    setupPlayerListeners(player)
+end
+
+Players.PlayerAdded:Connect(setupPlayerListeners)
+
+print("MM2 ESP Ready!")
